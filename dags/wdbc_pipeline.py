@@ -1,7 +1,7 @@
 """
 DDM501 Tutorial 03 — a data pipeline that runs
 
-Six tasks: ingest -> validate -> split -> scale -> train -> report.
+Seven tasks: ingest -> validate -> split -> scale -> train -> register -> report.
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def run_dir(ds: str) -> Path:
 
 @dag(
     dag_id="wdbc_pipeline",
-    description="Breast cancer extract: ingest, validate, split, scale, train, register",
+    description="Breast cancer extract: ingest, validate, split, scale, train, register, report",
     schedule="@daily",
     start_date=datetime(2026, 8, 20),
     catchup=False,
@@ -155,11 +155,14 @@ def wdbc_pipeline():
 
     @task
     def train(scaling: dict, ds: str = None) -> dict:
-        """Train on this run's scaled split and register the model with MLflow.
+        """Train on this run's scaled split and log a run to MLflow.
 
         The features are already scaled by the `scale` task, so this fits a
         plain classifier straight on train.parquet/test.parquet -- no
-        preprocessing pipeline needed here.
+        preprocessing pipeline needed here. Logs the model to the run but
+        does not register it -- that's the `register` task, kept separate
+        so a bad run can be inspected in MLflow without becoming a model
+        version.
         """
         train_df = pd.read_parquet(run_dir(ds) / "train.parquet")
         test_df = pd.read_parquet(run_dir(ds) / "test.parquet")
@@ -184,27 +187,28 @@ def wdbc_pipeline():
             mlflow.log_param("n_features", len(feature_cols))
             mlflow.log_metric("accuracy", accuracy)
             mlflow.log_metric("roc_auc", auc)
-            # registered_model_name turns this logged model into a new version
-            # in the registry; the fetch script only ever asks for that.
-            mlflow.sklearn.log_model(
-                model,
-                artifact_path="model",
-                registered_model_name=MLFLOW_MODEL_NAME,
-                input_example=X_train.head(1),
-            )
+            mlflow.sklearn.log_model(model, artifact_path="model", input_example=X_train.head(1))
             run_id = run.info.run_id
 
-        latest = mlflow.MlflowClient().get_registered_model(MLFLOW_MODEL_NAME).latest_versions
-        version = max(int(v.version) for v in latest)
-        log.info("registered %s version %d from run %s (accuracy=%.4f, roc_auc=%.4f)",
-                  MLFLOW_MODEL_NAME, version, run_id, accuracy, auc)
-        return {"mlflow_run_id": run_id, "model_version": version,
-                "accuracy": round(accuracy, 4), "roc_auc": round(auc, 4)}
+        log.info("logged run %s (accuracy=%.4f, roc_auc=%.4f)", run_id, accuracy, auc)
+        return {"mlflow_run_id": run_id, "accuracy": round(accuracy, 4), "roc_auc": round(auc, 4)}
 
     @task
-    def report(validation: dict, split_info: dict, scaling: dict, training: dict, ds: str = None) -> str:
+    def register(training: dict) -> dict:
+        """Register the model `train` logged as a new version in the MLflow
+        model registry. Separate task so it shows up on its own in the Grid
+        view instead of being buried inside `train`'s log."""
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        model_uri = f"runs:/{training['mlflow_run_id']}/model"
+        version = mlflow.register_model(model_uri, MLFLOW_MODEL_NAME)
+        log.info("registered %s version %s from run %s",
+                  MLFLOW_MODEL_NAME, version.version, training["mlflow_run_id"])
+        return {**training, "model_version": int(version.version)}
+
+    @task
+    def report(validation: dict, split_info: dict, scaling: dict, registered: dict, ds: str = None) -> str:
         """One line per run, appended to a log the whole pipeline shares."""
-        summary = {"ds": ds, **validation, **split_info, **scaling, **training}
+        summary = {"ds": ds, **validation, **split_info, **scaling, **registered}
         summary.pop("path", None)
         (run_dir(ds) / "summary.json").write_text(json.dumps(summary, indent=2))
 
@@ -222,7 +226,8 @@ def wdbc_pipeline():
     scaling = scale(validated)
     split_info >> scaling
     training = train(scaling)
-    report(validated, split_info, scaling, training)
+    registered = register(training)
+    report(validated, split_info, scaling, registered)
 
 
 wdbc_pipeline()

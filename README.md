@@ -149,12 +149,13 @@ Pass `--version N` to pull a specific model version instead of the latest, or
 `airflow`, đợi cả hai healthy) **hoàn toàn độc lập** — đã tắt hẳn stack của
 Tutorial 02-02 trong lúc test để xác nhận không còn phụ thuộc gì vào nó:
 
-- `airflow dags test wdbc_pipeline <ds>` — cả 6 task
-  (`ingest → validate → split → scale → train → report`) đều SUCCESS, nhiều
-  lần với các ngày khác nhau.
-- Task `train` đăng ký thành công model `wdbc-classifier` lên MLflow server
-  tự chứa của chính T03 (SQLite backend + artifact lưu qua HTTP proxy của
-  chính MLflow server, không cần S3/MinIO): `accuracy=0.9512`,
+- `airflow dags test wdbc_pipeline <ds>` — cả 7 task
+  (`ingest → validate → split → scale → train → register → report`) đều
+  SUCCESS, nhiều lần với các ngày khác nhau. `train` (log run) và `register`
+  (đăng ký version) là 2 task tách riêng để dễ quan sát trên Grid view.
+- Task `register` đăng ký thành công model `wdbc-classifier` lên MLflow
+  server tự chứa của chính T03 (SQLite backend + artifact lưu qua HTTP proxy
+  của chính MLflow server, không cần S3/MinIO): `accuracy=0.9512`,
   `roc_auc=0.9956`. Chạy lại vẫn tạo version mới mỗi lần, không ghi đè.
 - `scripts/fetch_and_predict.py` tải model về qua MLflow client API và dự
   đoán đúng 5/5 dòng test so với nhãn thật (`diagnosis`).
@@ -172,8 +173,8 @@ của chính MLflow server thay vì giả định hai container dùng chung file
 | | |
 |---|---|
 | `./setup.sh` — output thật: build cả 2 image, đợi `mlflow` rồi `airflow` healthy, in URL/password | ![setup.sh output](docs/screenshots/setup-sh-output.jpg) |
-| Airflow — DAG `wdbc_pipeline`, cả 6 task SUCCESS (container `ddm501-t03-airflow` đang chạy) | ![Airflow grid success](docs/screenshots/airflow-grid-success.jpg) |
-| Airflow — Graph view, `train` nối sau `scale`, trước `report` | ![Airflow graph](docs/screenshots/airflow-graph.jpg) |
+| Airflow — DAG `wdbc_pipeline`, cả 7 task SUCCESS (container `ddm501-t03-airflow` đang chạy) | ![Airflow grid success](docs/screenshots/airflow-grid-success.jpg) |
+| Airflow — Graph view, `train` và `register` tách riêng giữa `scale` và `report` | ![Airflow graph](docs/screenshots/airflow-graph.jpg) |
 | MLflow — 2 version của `wdbc-classifier` đã đăng ký | ![MLflow registered versions](docs/screenshots/mlflow-registered-versions.jpg) |
 | MLflow — chi tiết run: `accuracy=0.9512`, `roc_auc=0.9956`, nguồn `airflow`, đã register `wdbc-classifier v2` | ![MLflow run metrics](docs/screenshots/mlflow-run-metrics.jpg) |
 | `scripts/fetch_and_predict.py` — output thật của lần chạy: tải `wdbc-classifier` version 2 và dự đoán đúng 5/5 dòng test | ![fetch_and_predict.py output](docs/screenshots/fetch-and-predict-output.jpg) |
