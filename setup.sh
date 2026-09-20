@@ -11,12 +11,17 @@ if ! docker info >/dev/null 2>&1; then
     exit 1
 fi
 
+if [[ ! -f .env ]]; then
+    cp .env.example .env
+    echo "created .env from .env.example"
+fi
+
 # AIRFLOW_UID is only read on Linux; docker-compose.yml falls back to 50000
 # (the image's built-in airflow user) when it's unset, which is fine on
 # macOS/Windows.
-if [[ "$(uname -s)" == "Linux" && ! -f .env ]]; then
-    echo "AIRFLOW_UID=$(id -u)" > .env
-    echo "wrote .env with AIRFLOW_UID=$(id -u)"
+if [[ "$(uname -s)" == "Linux" ]]; then
+    sed -i "s/^AIRFLOW_UID=.*/AIRFLOW_UID=$(id -u)/" .env
+    echo "set AIRFLOW_UID=$(id -u) in .env"
 fi
 
 echo "Building and starting mlflow + airflow..."

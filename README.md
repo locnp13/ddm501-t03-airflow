@@ -15,17 +15,19 @@ task registers into this project's own MLflow server -- SQLite backend,
 artifacts on a local volume (`./mlflow-data`). Nothing else needs to be
 running first.
 
-Running this DAG locally (not via `docker compose`) needs one env var
-exported in the same shell, pointing at the `mlflow` service's published
-port:
+All the env vars the project needs live in `.env` (copy it from
+`.env.example`, or let `./setup.sh` do that for you). `docker-compose.yml`
+reads `.env` automatically. Running the DAG or `fetch_and_predict.py`
+outside Docker needs it loaded into your shell first:
 
 ```bash
-export MLFLOW_TRACKING_URI=http://127.0.0.1:15030
+cp .env.example .env    # first time only
+set -a; source .env; set +a
 ```
 
-Running via `docker compose` needs none of this -- `docker-compose.yml`
-already sets it, and `airflow` waits for `mlflow` to be healthy before it
-starts.
+Running via `docker compose` needs none of this -- `airflow` gets
+`MLFLOW_TRACKING_URI` set for it, and waits for `mlflow` to be healthy
+before it starts.
 
 ## Two ways to run it
 
@@ -55,13 +57,15 @@ The web UI comes up on <http://127.0.0.1:8080>. `standalone` prints the admin pa
 ./setup.sh
 ```
 
-`setup.sh` builds the image, starts both services, waits for them to be
-healthy, and prints the Airflow URL/password and the MLflow URL. Equivalent
-by hand:
+`setup.sh` creates `.env` from `.env.example` if it's missing (and on Linux,
+sets `AIRFLOW_UID` in it to your uid), builds the image, starts both
+services, waits for them to be healthy, and prints the Airflow URL/password
+and the MLflow URL. Equivalent by hand:
 
 ```bash
-# On Linux only
-echo "AIRFLOW_UID=$(id -u)" > .env
+cp .env.example .env    # first time only
+# On Linux only, so files written to the bind mounts are owned by you:
+sed -i "s/^AIRFLOW_UID=.*/AIRFLOW_UID=$(id -u)/" .env
 
 docker compose up -d --build
 docker compose ps        # wait for STATUS = healthy, about a minute
@@ -120,7 +124,7 @@ python3 -m venv .venv-scripts
 source .venv-scripts/bin/activate
 pip install mlflow==2.19.0 scikit-learn==1.6.0 pandas pyarrow
 
-export MLFLOW_TRACKING_URI=http://127.0.0.1:15030
+set -a; source .env; set +a
 
 python scripts/fetch_and_predict.py
 ```
